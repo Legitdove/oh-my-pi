@@ -701,6 +701,7 @@ export class AgentSession {
 	readonly #bash: BashRunner;
 
 	readonly #eval: EvalRunner;
+	readonly #extensionTaskSession: import("../tools").ToolSession | undefined;
 	/**
 	 * AsyncJobManager owned by this session (top-level only). Subagents leave
 	 * this undefined and **MUST NOT** dispose the global instance on teardown.
@@ -1295,6 +1296,7 @@ export class AgentSession {
 		this.settings = config.settings;
 		this.memoryEnabled = config.memoryEnabled ?? true;
 		this.#modelRegistry = config.modelRegistry;
+		this.#extensionTaskSession = config.extensionTaskSession;
 		this.#extensionRoots =
 			config.extensionRoots ??
 			(() => ({
@@ -7088,10 +7090,20 @@ export class AgentSession {
 				await this.reload();
 			},
 			getSystemPrompt: () => this.systemPrompt,
+			agents: {
+				spawn: async () => {
+					throw new Error("Native task-child spawning is unavailable in this OMP host.");
+				},
+			},
 			setInterval: (callback, ms, ...args) => this.#fallbackTimers().setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#fallbackTimers().setTimeout(callback, ms, ...args),
 			clearTimer: timer => this.#fallbackTimers().clear(timer),
 		};
+	}
+
+	/** Parent-bound ToolSession for the public extension task-child bridge. */
+	getExtensionTaskSession(): import("../tools").ToolSession | undefined {
+		return this.#extensionTaskSession;
 	}
 
 	/** Lazily create the runner-less command-context timer registry (#5664). */

@@ -207,6 +207,60 @@ describe("ExtensionRunner", () => {
 		expect(compact).toHaveBeenCalledWith("preserve current task");
 	});
 
+	it("routes extension ctx.agents.spawn through the initialized native host bridge", async () => {
+		const result = await loadTestExtensions();
+		const runner = new ExtensionRunner(
+			result.extensions,
+			result.runtime,
+			tempDir.path(),
+			sessionManager,
+			modelRegistry,
+		);
+		const spawnSubagent = vi.fn(async request => ({
+			agentId: "ExtensionWorker",
+			agent: request.agent,
+			exitCode: 0,
+			output: '{"ok":true}',
+		}));
+		runner.initialize(
+			{
+				sendMessage: () => {},
+				sendUserMessage: () => {},
+				appendEntry: () => {},
+				setLabel: () => {},
+				getActiveTools: () => [],
+				getAllTools: () => [],
+				setActiveTools: async () => {},
+				getCommands: () => [],
+				setModel: async () => false,
+				getThinkingLevel: () => undefined,
+				setThinkingLevel: () => {},
+				getSessionName: () => undefined,
+				setSessionName: async () => {},
+			},
+			{
+				getModel: () => undefined,
+				isIdle: () => true,
+				abort: () => {},
+				hasPendingMessages: () => false,
+				shutdown: () => {},
+				getContextUsage: () => undefined,
+				compact: async () => {},
+				getSystemPrompt: () => [],
+				spawnSubagent,
+			},
+		);
+
+		await expect(
+			runner.createContext().agents.spawn({ agent: "worker", task: "Inspect the target.", name: "ExtensionWorker" }),
+		).resolves.toMatchObject({ agentId: "ExtensionWorker", agent: "worker", exitCode: 0 });
+		expect(spawnSubagent).toHaveBeenCalledWith({
+			agent: "worker",
+			task: "Inspect the target.",
+			name: "ExtensionWorker",
+		});
+	});
+
 	describe("shortcut conflicts", () => {
 		it("warns when extension shortcut conflicts with built-in", async () => {
 			const extCode = `

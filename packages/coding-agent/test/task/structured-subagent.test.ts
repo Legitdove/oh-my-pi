@@ -16,6 +16,7 @@ import {
 	buildStructuredSubagentRecoveryHint,
 	resolveEffectiveSubagentPolicy,
 	runStructuredSubagent,
+	spawnExtensionSubagent,
 	StructuredSubagentError,
 	type StructuredSubagentRequest,
 } from "@oh-my-pi/pi-coding-agent/task/structured-subagent";
@@ -104,6 +105,31 @@ afterEach(() => {
 });
 
 describe("structured subagent primitive", () => {
+	it("runs extension requests through the native structured-subagent policy and result path", async () => {
+		mockDiscovery();
+		const parentTaskSession = session();
+		const dispatched: executorModule.ExecutorOptions[] = [];
+		vi.spyOn(executorModule, "runSubprocess").mockImplementation(async options => {
+			dispatched.push(options);
+			return result();
+		});
+
+		const execution = await spawnExtensionSubagent(parentTaskSession, {
+			agent: "worker",
+			name: "ExtensionWorker",
+			task: "Inspect the target.",
+			outputSchema: { type: "object", properties: { ok: { type: "boolean" } } },
+			schemaMode: "strict",
+		});
+
+		expect(dispatched[0]).toMatchObject({
+			cwd: parentTaskSession.cwd,
+			id: "ExtensionWorker",
+			agent: { name: "worker" },
+		});
+		expect(execution).toMatchObject({ agentId: "Worker", agent: "worker", exitCode: 0, output: '{"ok":true}' });
+	});
+
 	it("uses caller, agent, then session schemas in precedence order", async () => {
 		mockDiscovery();
 		const callerSchema = { type: "object", properties: { caller: { type: "string" } } };

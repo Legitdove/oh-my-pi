@@ -509,6 +509,13 @@ export interface ExtensionContext {
 	/** Structured memory runtime for status/search/save across the configured backend. */
 	memory?: MemoryRuntimeContext;
 	/**
+	 * Spawn a normal OMP task child from an extension lifecycle handler. The
+	 * implementation uses the same structured-subagent pipeline as the native
+	 * `task` tool, so the child is registered in Agent Hub with real parent
+	 * lineage and its completion can be awaited before the handler returns.
+	 */
+	agents: ExtensionAgentSpawner;
+	/**
 	 * Schedule a repeating callback whose throws are contained. Unlike raw
 	 * `setInterval`, a synchronous throw or rejected promise from `callback` is
 	 * logged and surfaced through the extension error channel instead of
@@ -556,6 +563,32 @@ export interface ExtensionContext {
 	 * by default -- it does not narrow or widen OMP's own security model.
 	 */
 	isProjectTrusted(): boolean;
+}
+
+/** Narrow, awaitable extension surface for native task children. */
+export interface ExtensionAgentSpawner {
+	spawn(request: ExtensionSubagentSpawnRequest): Promise<ExtensionSubagentSpawnResult>;
+}
+
+/** Inputs intentionally mirror only the safe, blocking subset of `task`. */
+export interface ExtensionSubagentSpawnRequest {
+	agent: string;
+	task: string;
+	name?: string;
+	context?: string;
+	outputSchema?: unknown;
+	schemaMode?: "permissive" | "strict";
+}
+
+/** Stable result returned to an extension after its child has settled. */
+export interface ExtensionSubagentSpawnResult {
+	agentId: string;
+	agent: string;
+	exitCode: number;
+	output: string;
+	error?: string;
+	aborted?: boolean;
+	structuredOutput?: unknown;
 }
 
 /**
@@ -1752,6 +1785,8 @@ export interface ExtensionContextActions {
 	getContextUsage: () => ContextUsage | undefined;
 	compact: (instructionsOrOptions?: string | CompactOptions) => Promise<void>;
 	getSystemPrompt: () => string[];
+	/** Optional while alternate hosts upgrade to the native task-child surface. */
+	spawnSubagent?: (request: ExtensionSubagentSpawnRequest) => Promise<ExtensionSubagentSpawnResult>;
 }
 
 /** Actions for ExtensionCommandContext (ctx.* in command handlers). */

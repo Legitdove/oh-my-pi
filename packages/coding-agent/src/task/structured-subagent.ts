@@ -48,6 +48,7 @@ import {
 } from "./types";
 import type { WorkPoolYieldItem } from "./workpool-yield";
 import { parseIsolationBackend } from "./worktree";
+import type { ExtensionSubagentSpawnRequest, ExtensionSubagentSpawnResult } from "../extensibility/extensions/types";
 
 /** Validation behavior requested for an effective output schema. */
 export type StructuredSubagentSchemaMode = "permissive" | "strict";
@@ -163,6 +164,39 @@ export interface StructuredSubagentResult {
 	changesApplied: boolean | null;
 	artifactsDir: string;
 	temporaryArtifacts: boolean;
+}
+
+/**
+ * Extension-facing bridge to the native task-child pipeline. This deliberately
+ * bypasses only TaskTool's model-facing rendering and approvals; discovery,
+ * policy, session persistence, AgentRegistry/Hub registration, parent lineage,
+ * and structured-output validation remain exactly the normal task path.
+ */
+export async function spawnExtensionSubagent(
+	session: ToolSession,
+	request: ExtensionSubagentSpawnRequest,
+): Promise<ExtensionSubagentSpawnResult> {
+	const execution = await runStructuredSubagent({
+		session,
+		invocationKind: "task",
+		assignment: request.task,
+		context: request.context,
+		agent: request.agent,
+		identity: { label: request.name },
+		...(Object.hasOwn(request, "outputSchema") ? { outputSchema: request.outputSchema } : {}),
+		...(request.schemaMode ? { schemaMode: request.schemaMode } : {}),
+		keepAlive: true,
+	});
+	const result = execution.result;
+	return {
+		agentId: result.id,
+		agent: result.agent,
+		exitCode: result.exitCode,
+		output: result.output,
+		...(result.error ? { error: result.error } : {}),
+		...(result.aborted ? { aborted: true } : {}),
+		...(result.structuredOutput ? { structuredOutput: result.structuredOutput } : {}),
+	};
 }
 
 /** Machine-readable failure category so adapters can retain their native errors. */

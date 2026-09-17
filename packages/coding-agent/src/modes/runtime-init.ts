@@ -8,6 +8,7 @@
  */
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import { getSessionSlashCommands } from "../extensibility/extensions/get-commands-handler";
+import { spawnExtensionSubagent } from "../task/structured-subagent";
 import type { ExtensionError, ExtensionMode, ExtensionUIContext } from "../extensibility/extensions/types";
 import type { AgentSession } from "../session/agent-session";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
@@ -125,6 +126,12 @@ export async function initializeExtensions(session: AgentSession, options: Initi
 			shutdown,
 			getContextUsage: () => session.getContextUsage(),
 			getSystemPrompt: () => session.systemPrompt,
+			spawnSubagent: request => {
+				const taskSession = session.getExtensionTaskSession();
+				if (!taskSession)
+					return Promise.reject(new Error("Native task-child spawning is unavailable in this OMP host."));
+				return spawnExtensionSubagent(taskSession, request);
+			},
 			compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
 		},
 		// ExtensionCommandContextActions — commands invokable via prompt("/command")
