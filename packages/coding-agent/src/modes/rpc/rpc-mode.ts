@@ -1312,6 +1312,15 @@ export async function runRpcMode(
 				return success(id, "get_state", state);
 			}
 
+			case "ensure_session_persisted": {
+				await session.sessionManager.ensureOnDisk();
+				return success(id, "ensure_session_persisted", {
+					sessionId: session.sessionManager.getSessionId(),
+					sessionFile: session.sessionManager.getSessionFile(),
+					persisted: session.sessionManager.isSessionOnDisk(),
+				});
+			}
+
 			case "set_fast_mode": {
 				const supported = session.setFastMode(command.enabled);
 				if (command.enabled && !supported) {

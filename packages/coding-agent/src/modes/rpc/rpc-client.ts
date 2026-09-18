@@ -25,6 +25,7 @@ import type {
 	RpcCommand,
 	RpcExtensionUIRequest,
 	RpcExtensionUIResponse,
+	RpcEnsureSessionPersistedResult,
 	RpcHandoffResult,
 	RpcHostToolCallRequest,
 	RpcHostToolCancelRequest,
@@ -647,6 +648,11 @@ export class RpcClient {
 					? state.tokensPerSecond
 					: null,
 		};
+	}
+
+	/** Materialize the current persisted session without requiring an agent turn. */
+	async ensureSessionPersisted(): Promise<RpcEnsureSessionPersistedResult> {
+		return this.#getData(await this.#send({ type: "ensure_session_persisted" }));
 	}
 
 	/**

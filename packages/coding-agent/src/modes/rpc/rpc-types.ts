@@ -75,6 +75,7 @@ export type RpcCommand =
 	| { id?: string; type: "abort_bash" }
 
 	// Session
+	| { id?: string; type: "ensure_session_persisted" }
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string }
@@ -119,6 +120,13 @@ export interface RpcSessionState {
 	dumpTools?: Array<{ name: string; description: string; parameters: unknown; examples?: readonly ToolExample[] }>;
 	/** Current context window usage. */
 	contextUsage?: ContextUsage;
+}
+
+/** Result of explicitly materializing the current persisted session. */
+export interface RpcEnsureSessionPersistedResult {
+	sessionId: string;
+	sessionFile?: string;
+	persisted: boolean;
 }
 
 export interface RpcAvailableSlashCommand {
@@ -201,6 +209,13 @@ export type RpcResponse =
 			command: "negotiate_protocol";
 			success: true;
 			data: { protocolVersion: 2 };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "ensure_session_persisted";
+			success: true;
+			data: RpcEnsureSessionPersistedResult;
 	  }
 
 	// Prompting (async - events follow)
