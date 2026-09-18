@@ -23,7 +23,7 @@ import type {
 	TerminalInputHandler,
 } from "../../extensibility/extensions";
 import { getSessionSlashCommands } from "../../extensibility/extensions/get-commands-handler";
-import { spawnExtensionSubagent } from "../../task/structured-subagent";
+import { getExtensionSubagentInvocation, spawnExtensionSubagent } from "../../task/structured-subagent";
 import { AskDialogComponent, boundPromptTitle, normalizeDialogQuestions } from "../../modes/components/ask-dialog";
 import { installExtensionComposerShape } from "../../modes/components/composer-shape-registry";
 import { EditorTopGap } from "../../modes/components/editor-top-gap";
@@ -218,6 +218,7 @@ export class ExtensionUiController {
 					return Promise.reject(new Error("Native task-child spawning is unavailable in this OMP host."));
 				return spawnExtensionSubagent(taskSession, request);
 			},
+			getSubagentInvocation: invocationId => getExtensionSubagentInvocation(this.ctx.session.getExtensionTaskSession()!, invocationId),
 		};
 		const commandActions: ExtensionCommandContextActions = {
 			getContextUsage: () => this.ctx.session.getContextUsage(),
@@ -455,6 +456,7 @@ export class ExtensionUiController {
 					return Promise.reject(new Error("Native task-child spawning is unavailable in this OMP host."));
 				return spawnExtensionSubagent(taskSession, request);
 			},
+			getSubagentInvocation: invocationId => getExtensionSubagentInvocation(this.ctx.session.getExtensionTaskSession()!, invocationId),
 		};
 		const commandActions: ExtensionCommandContextActions = {
 			getContextUsage: () => this.ctx.session.getContextUsage(),

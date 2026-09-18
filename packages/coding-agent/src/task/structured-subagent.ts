@@ -49,6 +49,7 @@ import {
 import type { WorkPoolYieldItem } from "./workpool-yield";
 import { parseIsolationBackend } from "./worktree";
 import type { ExtensionSubagentSpawnRequest, ExtensionSubagentSpawnResult } from "../extensibility/extensions/types";
+import { appendNativeChildInvocation, getNativeChildInvocation, type NativeChildInvocation } from "./invocation-journal";
 
 /** Validation behavior requested for an effective output schema. */
 export type StructuredSubagentSchemaMode = "permissive" | "strict";
@@ -133,6 +134,8 @@ export interface StructuredSubagentRequest {
 	workPoolYieldItems?: WorkPoolYieldItem[];
 	signal?: AbortSignal;
 	onProgress?: (progress: AgentProgress) => void;
+	/** Generic durable child invocation journal observer used by extension hosts. */
+	invocation?: { id: string; onUpdate?: (record: NativeChildInvocation) => void };
 }
 
 /** A normalized preflight result, reusable by tests and adapters. */
@@ -176,6 +179,7 @@ export async function spawnExtensionSubagent(
 	session: ToolSession,
 	request: ExtensionSubagentSpawnRequest,
 ): Promise<ExtensionSubagentSpawnResult> {
+	const invocationId = `invocation-${Snowflake.next()}`;
 	const execution = await runStructuredSubagent({
 		session,
 		invocationKind: "task",
@@ -186,9 +190,11 @@ export async function spawnExtensionSubagent(
 		...(Object.hasOwn(request, "outputSchema") ? { outputSchema: request.outputSchema } : {}),
 		...(request.schemaMode ? { schemaMode: request.schemaMode } : {}),
 		keepAlive: true,
+		invocation: { id: invocationId, onUpdate: request.onInvocation },
 	});
 	const result = execution.result;
 	return {
+		invocationId,
 		agentId: result.id,
 		agent: result.agent,
 		exitCode: result.exitCode,
@@ -197,6 +203,10 @@ export async function spawnExtensionSubagent(
 		...(result.aborted ? { aborted: true } : {}),
 		...(result.structuredOutput ? { structuredOutput: result.structuredOutput } : {}),
 	};
+}
+
+export async function getExtensionSubagentInvocation(session: ToolSession, invocationId: string): Promise<NativeChildInvocation | undefined> {
+	return getNativeChildInvocation(session.getSessionFile() ?? undefined, invocationId);
 }
 
 /** Machine-readable failure category so adapters can retain their native errors. */
@@ -482,7 +492,7 @@ function buildExecutorOptions(
 					outputSchema: policy.schema.schema,
 					outputSchemaOverridesAgent: policy.schema.outputSchemaOverridesAgent,
 					outputSchemaMode: policy.schema.mode,
-				}),
+			}),
 		sessionFile: lease.sessionFile,
 		persistArtifacts: !lease.temporary,
 		artifactsDir: lease.artifactsDir,
@@ -658,6 +668,29 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 			label: request.identity?.label ?? (request.invocationKind === "eval" ? "EvalAgent" : undefined),
 		});
 		const baseOptions = buildExecutorOptions(request, policy, lease, id);
+		if (request.invocation) {
+			const created: NativeChildInvocation = {
+				invocationId: request.invocation.id,
+				parentSessionId: request.session.getSessionId?.() ?? undefined,
+				childSessionFile: lease.sessionFile ? path.join(lease.artifactsDir, `${id}.jsonl`) : undefined,
+				agent: policy.agent.name,
+				status: "CREATED",
+				createdAt: new Date().toISOString(),
+			};
+			await appendNativeChildInvocation(lease.sessionFile ?? undefined, created);
+			request.invocation.onUpdate?.(created);
+			baseOptions.onSessionOpened = async identity => {
+				const running: NativeChildInvocation = {
+					...created,
+					childSessionId: identity.childSessionId,
+					childSessionFile: identity.childSessionFile ?? created.childSessionFile,
+					status: "RUNNING",
+					startedAt: new Date().toISOString(),
+				};
+				await appendNativeChildInvocation(lease.sessionFile ?? undefined, running);
+				request.invocation?.onUpdate?.(running);
+			};
+		}
 		baseOptions.onCleanupDeferred = completion => {
 			deferredCleanup = completion;
 		};
@@ -744,6 +777,23 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 		}
 
 		completedSuccessfully = result.exitCode === 0 && !result.error && !result.aborted;
+		if (request.invocation) {
+			const prior = await getNativeChildInvocation(lease.sessionFile ?? undefined, request.invocation.id);
+			const terminal: NativeChildInvocation = {
+				invocationId: request.invocation.id,
+				parentSessionId: request.session.getSessionId?.() ?? undefined,
+				childSessionId: prior?.childSessionId,
+				childSessionFile: prior?.childSessionFile,
+				agent: policy.agent.name,
+				status: result.aborted ? "CANCELLED" : (completedSuccessfully ? "COMPLETED" : "FAILED"),
+				createdAt: prior?.createdAt ?? new Date().toISOString(),
+				startedAt: prior?.startedAt,
+				terminalAt: new Date().toISOString(),
+				terminal: { exitCode: result.exitCode, ...(result.error ? { error: result.error } : {}), ...(result.aborted ? { aborted: true } : {}), ...(result.structuredOutput ? { structuredOutput: result.structuredOutput } : {}) },
+			};
+			await appendNativeChildInvocation(lease.sessionFile ?? undefined, terminal);
+			request.invocation.onUpdate?.(terminal);
+		}
 		return {
 			result,
 			policy,
@@ -753,6 +803,19 @@ export async function runStructuredSubagent(request: StructuredSubagentRequest):
 			temporaryArtifacts: lease.temporary,
 		};
 	} catch (error) {
+		if (request.invocation) {
+			const prior = await getNativeChildInvocation(lease.sessionFile ?? undefined, request.invocation.id);
+			if (prior && prior.status !== "COMPLETED" && prior.status !== "FAILED" && prior.status !== "CANCELLED") {
+				const failed: NativeChildInvocation = {
+					...prior,
+					status: "FAILED",
+					terminalAt: new Date().toISOString(),
+					terminal: { exitCode: 1, error: error instanceof Error ? error.message : String(error) },
+				};
+				await appendNativeChildInvocation(lease.sessionFile ?? undefined, failed);
+				request.invocation.onUpdate?.(failed);
+			}
+		}
 		if (error instanceof StructuredSubagentError) throw error;
 		throw new StructuredSubagentError(
 			"execution",

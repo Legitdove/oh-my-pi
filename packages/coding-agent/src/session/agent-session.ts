@@ -7094,6 +7094,7 @@ export class AgentSession {
 				spawn: async () => {
 					throw new Error("Native task-child spawning is unavailable in this OMP host.");
 				},
+				getInvocation: async () => undefined,
 			},
 			setInterval: (callback, ms, ...args) => this.#fallbackTimers().setInterval(callback, ms, ...args),
 			setTimeout: (callback, ms, ...args) => this.#fallbackTimers().setTimeout(callback, ms, ...args),

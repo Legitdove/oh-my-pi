@@ -568,6 +568,7 @@ export interface ExtensionContext {
 /** Narrow, awaitable extension surface for native task children. */
 export interface ExtensionAgentSpawner {
 	spawn(request: ExtensionSubagentSpawnRequest): Promise<ExtensionSubagentSpawnResult>;
+	getInvocation(invocationId: string): Promise<import("../../task/invocation-journal").NativeChildInvocation | undefined>;
 }
 
 /** Inputs intentionally mirror only the safe, blocking subset of `task`. */
@@ -578,10 +579,13 @@ export interface ExtensionSubagentSpawnRequest {
 	context?: string;
 	outputSchema?: unknown;
 	schemaMode?: "permissive" | "strict";
+	/** Receives durable CREATED/RUNNING/terminal native invocation snapshots. */
+	onInvocation?: (invocation: import("../../task/invocation-journal").NativeChildInvocation) => void;
 }
 
 /** Stable result returned to an extension after its child has settled. */
 export interface ExtensionSubagentSpawnResult {
+	invocationId?: string;
 	agentId: string;
 	agent: string;
 	exitCode: number;
@@ -1787,6 +1791,7 @@ export interface ExtensionContextActions {
 	getSystemPrompt: () => string[];
 	/** Optional while alternate hosts upgrade to the native task-child surface. */
 	spawnSubagent?: (request: ExtensionSubagentSpawnRequest) => Promise<ExtensionSubagentSpawnResult>;
+	getSubagentInvocation?: (invocationId: string) => Promise<import("../../task/invocation-journal").NativeChildInvocation | undefined>;
 }
 
 /** Actions for ExtensionCommandContext (ctx.* in command handlers). */

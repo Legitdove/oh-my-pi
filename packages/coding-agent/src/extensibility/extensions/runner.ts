@@ -453,6 +453,7 @@ export class ExtensionRunner {
 	#compactFn: (instructionsOrOptions?: string | CompactOptions) => Promise<void> = async () => {};
 	#getSystemPromptFn: () => string[] = () => [];
 	#spawnSubagentFn: ExtensionContextActions["spawnSubagent"] = undefined;
+	#getSubagentInvocationFn: ExtensionContextActions["getSubagentInvocation"] = undefined;
 	#getAsyncJobSnapshotFn: () => AsyncJobSnapshot | null = () => null;
 	#newSessionHandler: NewSessionHandler = async () => ({ cancelled: false });
 	#branchHandler: BranchHandler = async () => ({ cancelled: false });
@@ -702,6 +703,7 @@ export class ExtensionRunner {
 		this.#compactFn = contextActions.compact;
 		this.#getSystemPromptFn = contextActions.getSystemPrompt;
 		this.#spawnSubagentFn = contextActions.spawnSubagent;
+		this.#getSubagentInvocationFn = contextActions.getSubagentInvocation;
 
 		// Command context actions (optional, only for interactive mode)
 		if (commandContextActions) {
@@ -1212,6 +1214,10 @@ export class ExtensionRunner {
 						return Promise.reject(new Error("Native task-child spawning is unavailable in this OMP host."));
 					}
 					return this.#spawnSubagentFn(request);
+				},
+				getInvocation: invocationId => {
+					if (!this.#getSubagentInvocationFn) return Promise.resolve(undefined);
+					return this.#getSubagentInvocationFn(invocationId);
 				},
 			},
 			setInterval: (callback, ms, ...args) => this.#managedTimers.setInterval(callback, ms, ...args),

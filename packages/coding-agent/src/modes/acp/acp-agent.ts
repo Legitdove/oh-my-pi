@@ -73,7 +73,7 @@ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins
 import { buildAvailableSlashCommands, toAcpAvailableCommands } from "../../slash-commands/available-commands";
 import { DEFAULT_STT_MODEL_KEY, STT_MODEL_OPTIONS } from "../../stt/models";
 import { refreshAgentDiscovery } from "../../task";
-import { spawnExtensionSubagent } from "../../task/structured-subagent";
+import { getExtensionSubagentInvocation, spawnExtensionSubagent } from "../../task/structured-subagent";
 import { AUTO_THINKING, parseConfiguredThinkingLevel } from "../../thinking";
 import { OTHER_OPTION } from "../../tools/ask";
 import { normalizeLocalScheme } from "../../tools/path-utils";
@@ -2612,6 +2612,7 @@ export class AcpAgent implements Agent {
 						return Promise.reject(new Error("Native task-child spawning is unavailable in this OMP host."));
 					return spawnExtensionSubagent(taskSession, request);
 				},
+				getSubagentInvocation: invocationId => getExtensionSubagentInvocation(record.session.getExtensionTaskSession()!, invocationId),
 				compact: instructionsOrOptions => runExtensionCompact(record.session, instructionsOrOptions),
 			},
 			{

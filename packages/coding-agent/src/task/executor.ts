@@ -476,6 +476,8 @@ export interface ExecutorOptions {
 	restrictToolNames?: boolean;
 	signal?: AbortSignal;
 	onProgress?: (progress: AgentProgress) => void;
+	/** Called after the child SessionManager is durable but before its AgentSession is created or dispatched. */
+	onSessionOpened?: (identity: { childSessionId: string; childSessionFile?: string }) => Promise<void> | void;
 	/**
 	 * Epochs (ms, `Date.now()`) bracketing the concurrency-semaphore wait:
 	 * `invokedAt` is stamped at the spawn boundary before `acquire()`,
@@ -3747,6 +3749,10 @@ export async function runSubprocess(options: ExecutorOptions): Promise<SingleRes
 			});
 
 			const sessionManager = await awaitAbortable(sessionManagerPromise);
+			await options.onSessionOpened?.({
+				childSessionId: sessionManager.getSessionId(),
+				childSessionFile: sessionManager.getSessionFile() ?? undefined,
+			});
 			if (options.parentArtifactManager) {
 				sessionManager.adoptArtifactManager(options.parentArtifactManager);
 			}
