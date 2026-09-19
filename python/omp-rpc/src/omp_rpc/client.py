@@ -17,6 +17,7 @@ from .host_tools import HostTool, HostToolContext
 from .host_uris import HostUri, HostUriContext, normalize_read_result
 from .protocol import (
     AgentStartEvent,
+    PromptResultEvent,
     AgentEndEvent,
     AgentMessage,
     AssistantMessage,
@@ -1352,7 +1353,7 @@ class RpcClient:
                     raise async_errors[0]
 
                 event_payloads = self._events.snapshot_from(start_index)
-                if any(
+                if self._is_agent_idle() or any(
                     payload.get("type") == "agent_end"
                     and payload.get("isTerminal") is not False
                     for payload in event_payloads
@@ -1970,6 +1971,8 @@ class RpcClient:
                     isinstance(event, AgentEndEvent)
                     and event.is_terminal is not False
                 ):
+                    self._mark_agent_run_completed()
+                if isinstance(event, PromptResultEvent) and not event.agent_invoked:
                     self._mark_agent_run_completed()
                 self._dispatch_listeners(
                     "event", event.type, self._event_listeners, event

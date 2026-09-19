@@ -1136,6 +1136,12 @@ class TodoAutoClearEvent:
 
 
 @dataclass(slots=True, frozen=True)
+class PromptResultEvent:
+    agent_invoked: bool
+    type: Literal["prompt_result"] = "prompt_result"
+
+
+@dataclass(slots=True, frozen=True)
 class UnknownNotification:
     payload: JsonObject
     type: Literal["unknown"] = "unknown"
@@ -1162,6 +1168,7 @@ RpcAgentEvent: TypeAlias = (
     | TtsrTriggeredEvent
     | TodoReminderEvent
     | TodoAutoClearEvent
+    | PromptResultEvent
 )
 
 RpcNotification: TypeAlias = (
@@ -1644,6 +1651,8 @@ def parse_notification(payload: JsonObject) -> RpcNotification:
         return parse_extension_ui_request(payload)
     if event_type == "extension_error":
         return parse_extension_error(payload)
+    if event_type == "prompt_result":
+        return PromptResultEvent(agent_invoked=_require_bool(payload, "agentInvoked"))
     if event_type == "agent_start":
         return AgentStartEvent()
     if event_type == "agent_end":

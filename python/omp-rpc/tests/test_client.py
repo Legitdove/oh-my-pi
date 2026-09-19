@@ -407,6 +407,9 @@ FAKE_SERVER = textwrap.dedent(
         elif command_type in {"prompt", "abort_and_prompt"}:
             respond(request_id, command_type, {})
             message = command["message"]
+            if message == "local only":
+                print(json.dumps({"type": "prompt_result", "id": request_id, "agentInvoked": False}), flush=True)
+                continue
             if message == "needs ui":
                 print(json.dumps({"type": "extension_ui_request", "id": "ui-1", "method": "input", "title": "Need input", "placeholder": "value"}), flush=True)
                 continue
@@ -983,6 +986,11 @@ class RpcClientTests(unittest.TestCase):
             turn = client.prompt_and_wait("say hello", timeout=2.0)
             self.assertEqual(turn.require_assistant_text(), "pong")
             self.assertGreaterEqual(len(turn.events), 3)
+
+    def test_local_only_prompt_result_completes_waiters(self) -> None:
+        with self.make_client() as client:
+            client.prompt("local only")
+            client.wait_for_idle(timeout=2.0)
 
     def test_prompt_and_wait_reconstructs_compacted_terminal_messages(self) -> None:
         with self.make_client() as client:
