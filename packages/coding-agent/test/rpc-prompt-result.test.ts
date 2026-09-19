@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import * as path from "node:path";
+import { parseSessionEntries } from "@oh-my-pi/pi-coding-agent";
 import {
 	RpcExtensionUserMessageTracker,
 	reportLocalOnlyPromptResult,
 	watchAndReportLocalOnlyPromptResult,
 } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import { RpcClient } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-client";
+import { TempDir } from "@oh-my-pi/pi-utils";
 import type { ExtensionActions } from "../src/extensibility/extensions/types";
 import { initializeExtensions } from "../src/modes/runtime-init";
 import type { AgentSession } from "../src/session/agent-session";
@@ -452,6 +456,44 @@ describe("initializeExtensions invokingTask rejection safety", () => {
 });
 
 describe("watchAndReportLocalOnlyPromptResult", () => {
+	test("waits for a local extension entry to flush before reporting the prompt lifecycle complete", async () => {
+		using tempDir = TempDir.createSync("@omp-rpc-local-entry-");
+		const extensionPath = tempDir.join("durability-probe.ts");
+		const marker = `durability-proof:${Date.now()}`;
+		await Bun.write(
+			extensionPath,
+			[
+				"export default function (pi) {",
+				'  pi.registerCommand("durability-probe", {',
+				"    handler: async (args) => { pi.appendEntry(\"durability-proof\", { marker: args.trim() }); },",
+				"  });",
+				"}",
+				"",
+			].join("\n"),
+		);
+		using client = new RpcClient({
+			cliPath: path.join(import.meta.dir, "..", "src", "cli.ts"),
+			cwd: tempDir.path(),
+			env: { PI_CODING_AGENT_DIR: tempDir.join("profile"), ANTHROPIC_API_KEY: "test" },
+			args: ["--no-extensions", "--extension", extensionPath],
+		});
+
+		await client.start();
+		const persisted = await client.ensureSessionPersisted();
+		await client.prompt(`/durability-probe ${marker}`);
+		await client.waitForIdle(10_000);
+		const secondMarker = `${marker}:prompt-and-wait`;
+		expect(await client.promptAndWait(`/durability-probe ${secondMarker}`, undefined, 10_000)).toEqual([]);
+
+		const entries = parseSessionEntries(await Bun.file(persisted.sessionFile).text());
+		expect(entries).toContainEqual(
+			expect.objectContaining({ type: "custom", customType: "durability-proof", data: { marker } }),
+		);
+		expect(entries).toContainEqual(
+			expect.objectContaining({ type: "custom", customType: "durability-proof", data: { marker: secondMarker } }),
+		);
+	}, 20_000);
+
 	test("reports builtin residual prompts that complete locally", async () => {
 		const output: object[] = [];
 		const extensionUserMessages = new RpcExtensionUserMessageTracker();

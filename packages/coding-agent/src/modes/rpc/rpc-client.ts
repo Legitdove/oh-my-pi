@@ -32,6 +32,7 @@ import type {
 	RpcHostToolDefinition,
 	RpcHostToolResult,
 	RpcHostToolUpdate,
+	RpcPromptResultFrame,
 	RpcResponse,
 	RpcSessionState,
 	RpcSubagentEventFrame,
@@ -215,6 +216,10 @@ function isRpcAvailableCommandsUpdateFrame(value: unknown): value is RpcAvailabl
 	return value.type === "available_commands_update" && Array.isArray(value.commands);
 }
 
+function isRpcPromptResultFrame(value: unknown): value is RpcPromptResultFrame {
+	return isRecord(value) && value.type === "prompt_result" && typeof value.agentInvoked === "boolean";
+}
+
 function isRpcHostToolCallRequest(value: unknown): value is RpcHostToolCallRequest {
 	if (!isRecord(value)) return false;
 	return (
@@ -278,6 +283,10 @@ export class RpcClient {
 	#subagentProgressListeners = new Set<RpcSubagentProgressListener>();
 	#subagentEventListeners = new Set<RpcSubagentEventListener>();
 	#availableCommandsUpdateListeners = new Set<RpcAvailableCommandsUpdateListener>();
+	#scheduledPromptRuns = 0;
+	#completedPromptRuns = 0;
+	#earlyPromptCompletions = 0;
+	#idleListeners: Array<() => void> = [];
 	#pendingRequests: Map<string, { resolve: (response: RpcResponse) => void; reject: (error: Error) => void }> =
 		new Map();
 	#customTools: RpcClientCustomTool[] = [];
@@ -593,6 +602,7 @@ export class RpcClient {
 	 */
 	async prompt(message: string, images?: ImageContent[]): Promise<void> {
 		await this.#send({ type: "prompt", message, images });
+		this.#markPromptRunScheduled();
 	}
 
 	/**
@@ -999,13 +1009,15 @@ export class RpcClient {
 
 	/**
 	 * Wait for agent to become idle (no streaming).
-	 * Resolves when agent_end event is received.
+	 * Resolves when the most recently scheduled prompt reaches agent_end or a
+	 * local-only prompt_result terminal frame.
 	 */
 	waitForIdle(timeout = 60000): Promise<void> {
+		if (this.#isPromptIdle()) return Promise.resolve();
 		const { promise, resolve, reject } = Promise.withResolvers<void>();
 		let settled = false;
-		const unsubscribe = this.onEvent(event => {
-			if (event.type === "agent_end") {
+		const unsubscribe = this.#onPromptIdle(() => {
+			if (this.#isPromptIdle()) {
 				settled = true;
 				unsubscribe();
 				clearTimeout(timeoutId);
@@ -1029,11 +1041,14 @@ export class RpcClient {
 		const { promise, resolve, reject } = Promise.withResolvers<AgentEvent[]>();
 		const events: AgentEvent[] = [];
 		let settled = false;
-		const unsubscribe = this.onEvent(event => {
+		const unsubscribeEvents = this.onEvent(event => {
 			events.push(event);
-			if (event.type === "agent_end") {
+		});
+		const unsubscribeIdle = this.#onPromptIdle(() => {
+			if (this.#isPromptIdle()) {
 				settled = true;
-				unsubscribe();
+				unsubscribeEvents();
+				unsubscribeIdle();
 				clearTimeout(timeoutId);
 				resolve(events);
 			}
@@ -1042,7 +1057,8 @@ export class RpcClient {
 		const timeoutId = this.#startTimeout(timeout, () => {
 			if (settled) return;
 			settled = true;
-			unsubscribe();
+			unsubscribeEvents();
+			unsubscribeIdle();
 			reject(new Error(`Timeout collecting events. Stderr: ${this.#process?.peekStderr() ?? ""}`));
 		});
 		return promise;
@@ -1118,6 +1134,11 @@ export class RpcClient {
 			return;
 		}
 
+		if (isRpcPromptResultFrame(data)) {
+			if (!data.agentInvoked) this.#markPromptRunCompleted();
+			return;
+		}
+
 		if (!isAgentSessionEvent(data)) return;
 
 		for (const listener of this.#sessionEventListeners) {
@@ -1129,6 +1150,41 @@ export class RpcClient {
 		for (const listener of this.#eventListeners) {
 			listener(data);
 		}
+		if (data.type === "agent_end") this.#markPromptRunCompleted();
+	}
+
+	#markPromptRunScheduled(): void {
+		this.#scheduledPromptRuns += 1;
+		if (this.#earlyPromptCompletions > 0) {
+			this.#earlyPromptCompletions -= 1;
+			this.#completedPromptRuns += 1;
+			this.#notifyPromptIdle();
+		}
+	}
+
+	#markPromptRunCompleted(): void {
+		if (this.#completedPromptRuns < this.#scheduledPromptRuns) {
+			this.#completedPromptRuns += 1;
+			this.#notifyPromptIdle();
+			return;
+		}
+		this.#earlyPromptCompletions += 1;
+	}
+
+	#isPromptIdle(): boolean {
+		return this.#scheduledPromptRuns === this.#completedPromptRuns;
+	}
+
+	#onPromptIdle(listener: () => void): () => void {
+		this.#idleListeners.push(listener);
+		return () => {
+			const index = this.#idleListeners.indexOf(listener);
+			if (index !== -1) this.#idleListeners.splice(index, 1);
+		};
+	}
+
+	#notifyPromptIdle(): void {
+		for (const listener of [...this.#idleListeners]) listener();
 	}
 
 	#send(command: RpcCommandBody, timeoutMs = 30_000): Promise<RpcResponse> {
