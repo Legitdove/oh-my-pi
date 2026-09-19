@@ -1234,11 +1234,14 @@ export async function runRpcMode(
 				// If streaming and streamingBehavior specified, queues via steer/followUp
 				watchAndReportLocalOnlyPromptResult({
 					id,
-					startPrompt: () =>
-						session.prompt(command.message, {
+					startPrompt: async () => {
+						const agentInvoked = await session.prompt(command.message, {
 							images: command.images,
 							streamingBehavior: command.streamingBehavior,
-						}),
+						});
+						if (!agentInvoked) await session.sessionManager.flush();
+						return agentInvoked;
+					},
 					output,
 					onError: promptError => output(error(id, "prompt", promptError.message)),
 					extensionUserMessageTracker,
